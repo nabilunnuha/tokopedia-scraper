@@ -1,0 +1,10 @@
+# activate virtual environment
+python -m venv venv
+venv\Scripts\activate
+
+# install require modul + pyinstaller
+pip install -r requirements.txt
+pip install pyinstaller
+
+# compile
+pyinstaller --onefile --noconfirm --console --clean main.py
