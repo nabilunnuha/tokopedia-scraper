@@ -1,7 +1,7 @@
-import requests, json, time, logging, colorama
+import requests, json, time, logging, colorama, re
 
 class Scraper:
-    def __init__(self, filter_product:dict, max_page_per_url: int) -> None:
+    def __init__(self, filter_product:dict, max_page_per_url: int, black_list_key: list[str]) -> None:
         '''
         - ex. filter_product:
             {"min_sold": 10, "max_sold":999,"min_price":10000,"max_price":150000,"min_rating":4.2}
@@ -16,6 +16,7 @@ class Scraper:
         }
         self.filter_product: dict = filter_product
         self.max_page_per_url: int = max_page_per_url
+        self.black_list_key: list[str] = black_list_key
         self.log: logging = create_logger(__name__)
         self.count_scrape: int = 0
         self.cookie_dict: dict = {}
@@ -126,10 +127,9 @@ class Scraper:
         try:
             self.restore_headers()
             identifier:str = url_category.split('?')[0]
-            for f in self.cat_id_list:
-                if identifier.lower() in f['curl'].lower():
-                    url_id = f['cid']
-                    break
+            url_id = next((f['cid'] for f in self.cat_id_list if identifier.lower() in f['curl'].lower()), None)
+            if not url_id:
+                raise ValueError('url_id Not found')
             identifier = identifier.replace('https://www.tokopedia.com/p/','').replace('/','_').lower()
             payload = [{"operationName":"SearchProductQuery","variables":{
                 "params":f"page=2&ob=&identifier={identifier}&sc={url_id}&user_id=0&rows=60&start=1&source=directory&device=desktop&page=2&related=true&st=product&safe_search=false",
@@ -142,33 +142,40 @@ class Scraper:
             max_page = max_page if max_page <= self.max_page_per_url else self.max_page_per_url
             start = 1
             self.log.info('Getting category product...')
-            for _ in range(1, max_page):
-                payload = [{"operationName":"SearchProductQuery","variables":{
-                    "params":f"page=2&ob=&identifier={identifier}&sc={url_id}&user_id=0&rows=60&start={start}&source=directory&device=desktop&page=2&related=true&st=product&safe_search=false",
-                    "adParams":f"page=2&page=2&dep_id={url_id}&ob=&ep=product&item=15&src=directory&device=desktop&user_id=0&minimum_item=15&start={start}&no_autofill_range=5-14"
-                    },"query":"query SearchProductQuery($params: String, $adParams: String) {\n  CategoryProducts: searchProduct(params: $params) {\n    count\n    data: products {\n      id\n      url\n      imageUrl: image_url\n      imageUrlLarge: image_url_700\n      catId: category_id\n      gaKey: ga_key\n      countReview: count_review\n      discountPercentage: discount_percentage\n      preorder: is_preorder\n      name\n      price\n      priceInt: price_int\n      original_price\n      rating\n      wishlist\n      labels {\n        title\n        color\n        __typename\n      }\n      badges {\n        imageUrl: image_url\n        show\n        __typename\n      }\n      shop {\n        id\n        url\n        name\n        goldmerchant: is_power_badge\n        official: is_official\n        reputation\n        clover\n        location\n        __typename\n      }\n      labelGroups: label_groups {\n        position\n        title\n        type\n        __typename\n      }\n      __typename\n    }\n    __typename\n  }\n  displayAdsV3(displayParams: $adParams) {\n    data {\n      id\n      ad_ref_key\n      redirect\n      sticker_id\n      sticker_image\n      productWishListUrl: product_wishlist_url\n      clickTrackUrl: product_click_url\n      shop_click_url\n      product {\n        id\n        name\n        wishlist\n        image {\n          imageUrl: s_ecs\n          trackerImageUrl: s_url\n          __typename\n        }\n        url: uri\n        relative_uri\n        price: price_format\n        campaign {\n          original_price\n          discountPercentage: discount_percentage\n          __typename\n        }\n        wholeSalePrice: wholesale_price {\n          quantityMin: quantity_min_format\n          quantityMax: quantity_max_format\n          price: price_format\n          __typename\n        }\n        count_talk_format\n        countReview: count_review_format\n        category {\n          id\n          __typename\n        }\n        preorder: product_preorder\n        product_wholesale\n        free_return\n        isNewProduct: product_new_label\n        cashback: product_cashback_rate\n        rating: product_rating\n        top_label\n        bottomLabel: bottom_label\n        __typename\n      }\n      shop {\n        image_product {\n          image_url\n          __typename\n        }\n        id\n        name\n        domain\n        location\n        city\n        tagline\n        goldmerchant: gold_shop\n        gold_shop_badge\n        official: shop_is_official\n        lucky_shop\n        uri\n        owner_id\n        is_owner\n        badges {\n          title\n          image_url\n          show\n          __typename\n        }\n        __typename\n      }\n      applinks\n      __typename\n    }\n    template {\n      isAd: is_ad\n      __typename\n    }\n    __typename\n  }\n}\n"
-                }]
-                r = self.session.post('https://gql.tokopedia.com/graphql/SearchProductQuery',headers=self.headers,data=json.dumps(payload),timeout=self.timeout).json()
-                list_product = r[0]['data']['CategoryProducts']['data']
-                start += 60
-                for i in list_product:
-                    try:
-                        shop_name: str  = i['shop']['name']
-                        shop_url: str = i['shop']['url']
-                        shop_domain = shop_url.split('/')[-1]
-                        product_url: str = i['url']
-                        price = int(i['priceInt'])
-                        rating = float(i['rating'])
-                        product_name: str = i['name']
-                        identifier_product: str  = product_url.split('?')[0].replace(f'{shop_url}/','').replace('/','_').lower()
-                        if self.filter_product:
-                            if price < self.filter_product['min_price'] or price > self.filter_product['max_price']:
+            for page in range(1, max_page):
+                try:
+                    payload = [{"operationName":"SearchProductQuery","variables":{
+                        "params":f"page=2&ob=&identifier={identifier}&sc={url_id}&user_id=0&rows=60&start={start}&source=directory&device=desktop&page=2&related=true&st=product&safe_search=false",
+                        "adParams":f"page=2&page=2&dep_id={url_id}&ob=&ep=product&item=15&src=directory&device=desktop&user_id=0&minimum_item=15&start={start}&no_autofill_range=5-14"
+                        },"query":"query SearchProductQuery($params: String, $adParams: String) {\n  CategoryProducts: searchProduct(params: $params) {\n    count\n    data: products {\n      id\n      url\n      imageUrl: image_url\n      imageUrlLarge: image_url_700\n      catId: category_id\n      gaKey: ga_key\n      countReview: count_review\n      discountPercentage: discount_percentage\n      preorder: is_preorder\n      name\n      price\n      priceInt: price_int\n      original_price\n      rating\n      wishlist\n      labels {\n        title\n        color\n        __typename\n      }\n      badges {\n        imageUrl: image_url\n        show\n        __typename\n      }\n      shop {\n        id\n        url\n        name\n        goldmerchant: is_power_badge\n        official: is_official\n        reputation\n        clover\n        location\n        __typename\n      }\n      labelGroups: label_groups {\n        position\n        title\n        type\n        __typename\n      }\n      __typename\n    }\n    __typename\n  }\n  displayAdsV3(displayParams: $adParams) {\n    data {\n      id\n      ad_ref_key\n      redirect\n      sticker_id\n      sticker_image\n      productWishListUrl: product_wishlist_url\n      clickTrackUrl: product_click_url\n      shop_click_url\n      product {\n        id\n        name\n        wishlist\n        image {\n          imageUrl: s_ecs\n          trackerImageUrl: s_url\n          __typename\n        }\n        url: uri\n        relative_uri\n        price: price_format\n        campaign {\n          original_price\n          discountPercentage: discount_percentage\n          __typename\n        }\n        wholeSalePrice: wholesale_price {\n          quantityMin: quantity_min_format\n          quantityMax: quantity_max_format\n          price: price_format\n          __typename\n        }\n        count_talk_format\n        countReview: count_review_format\n        category {\n          id\n          __typename\n        }\n        preorder: product_preorder\n        product_wholesale\n        free_return\n        isNewProduct: product_new_label\n        cashback: product_cashback_rate\n        rating: product_rating\n        top_label\n        bottomLabel: bottom_label\n        __typename\n      }\n      shop {\n        image_product {\n          image_url\n          __typename\n        }\n        id\n        name\n        domain\n        location\n        city\n        tagline\n        goldmerchant: gold_shop\n        gold_shop_badge\n        official: shop_is_official\n        lucky_shop\n        uri\n        owner_id\n        is_owner\n        badges {\n          title\n          image_url\n          show\n          __typename\n        }\n        __typename\n      }\n      applinks\n      __typename\n    }\n    template {\n      isAd: is_ad\n      __typename\n    }\n    __typename\n  }\n}\n"
+                    }]
+                    r = self.session.post('https://gql.tokopedia.com/graphql/SearchProductQuery',headers=self.headers,data=json.dumps(payload),timeout=self.timeout).json()
+                    list_product = r[0]['data']['CategoryProducts']['data']
+                    start += 60
+                    for i in list_product:
+                        try:
+                            shop_name: str  = i['shop']['name']
+                            shop_url: str = i['shop']['url']
+                            shop_domain = shop_url.split('/')[-1]
+                            product_url: str = i['url']
+                            price = int(i['priceInt'])
+                            rating = float(i['rating'])
+                            product_name: str = i['name']
+                            identifier_product: str  = product_url.split('?')[0].replace(f'{shop_url}/','').replace('/','_').lower()
+                            
+                            if any(key.lower() in clean_string(product_name).lower() for key in self.black_list_key):
                                 continue
-                            if rating < float(self.filter_product['min_rating']):
-                                continue
-                        list_data.append({'shop_name':shop_name,'product_url':product_url, 'price':price,'rating':rating,'product_name':product_name,'identifier_product':identifier_product,'shop_domain':shop_domain})
-                    except:
-                        pass
+
+                            if self.filter_product:
+                                if price < self.filter_product['min_price'] or price > self.filter_product['max_price']:
+                                    continue
+                                if float(rating) < float(self.filter_product['min_rating']):
+                                    continue
+                            list_data.append({'shop_name':shop_name,'product_url':product_url, 'price':price,'rating':rating,'product_name':product_name,'identifier_product':identifier_product,'shop_domain':shop_domain})
+                        except:
+                            pass
+                except:
+                    self.log.error(f'Error: Get product in page {page}')
         except Exception as e:
             self.log.error(f'Error: {e}')
         finally:
@@ -371,4 +378,4 @@ class ColoredFormatter(logging.Formatter):
             record.levelname = f"{self._level_colors[record.levelno]}{record.levelname}{self._reset_color}"
         return super().format(record)   
     
-from .other_func import create_logger, write_csv
+from .other_func import create_logger, write_csv, clean_string

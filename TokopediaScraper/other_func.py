@@ -1,4 +1,4 @@
-import json, logging, sys, os, csv
+import json, logging, sys, os, csv, re
 
 def write_csv(data_list: list[dict], filename: str) -> None:
     header = data_list[0].keys()
@@ -36,17 +36,25 @@ def create_logger(logger_name,log_path='./log/log.txt') -> logging.Logger:
 def create_not_exist_folder() -> None:
     if not os.path.exists('results'):
         os.mkdir('results')
+        
     if not os.path.exists('log'):
         os.mkdir('log')
+        
     if not os.path.exists('config'):
         os.mkdir('config')
+        
     if not os.path.exists('config/setting.json'):
         data = {"min_sold": 25, "max_sold":9999, "min_price":25000, "max_price":150000, "min_rating":4.2, 'max_product_per_csv':10000, 'max_page_per_url':99}
         with open('config/setting.json','w') as f:
             json.dump(data,f,indent=4)
+            
+    if not os.path.exists('config/black_list_keyword.txt'):
+        data = ['nota', 'live']
+        with open('config/black_list_keyword.txt','w') as f:
+            f.write('\n'.join(data))
 
 def remove_success_scrape(url: str) -> None:
-    with open('list_catagori_tokopedia.txt', 'r') as f:
+    with open('list_catagori_tokopedia.txt', 'r', encoding='utf-8') as f:
         list_cat = [i.strip() for i in f.readlines()]
         list_cat = [i for i in list(set(list_cat)) if url.strip() != i.strip()]
     
@@ -55,5 +63,16 @@ def remove_success_scrape(url: str) -> None:
             f.write('\n'.join(list_cat))
         else:
             f.write('')
+             
+def clean_string(teks: str) -> str:
+    teks_bersih = re.sub(r'[^a-zA-Z0-9\s]', '', teks)
+    teks_bersih = re.sub(r'\s+', ' ', teks_bersih)
+    return teks_bersih.strip()
+             
+def get_key_user_input(path_key: str='./config/black_list_keyword.txt', min_len_str: int=4) -> list[str]:
+    with open(path_key, 'r', encoding='utf-8') as f:
+        data = [clean_string(key) for key in f.readlines()]
+        data = [key for key in data if len(key) >= min_len_str]
+    return list(set(data))
              
 from .tokopedia import ColoredFormatter

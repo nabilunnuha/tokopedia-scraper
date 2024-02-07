@@ -1,10 +1,11 @@
 import json, time, random, traceback
-from TokopediaScraper.other_func import create_not_exist_folder, remove_success_scrape
+from TokopediaScraper.other_func import create_not_exist_folder, remove_success_scrape, get_key_user_input
 from TokopediaScraper.tokopedia import Scraper
 
 def main():
     try:
         create_not_exist_folder()
+        black_list_keyword = get_key_user_input()
         setting = str(input('default setting ( d / s ) setting ulang: '))
         if setting.lower().strip() == 's':
             min_sold = int(input('min sold: '))
@@ -35,6 +36,7 @@ def main():
         scrp = Scraper(
             filter_product={"min_sold": min_sold, "max_sold":max_sold, "min_price":min_price, "max_price":max_price, "min_rating":min_rating},
             max_page_per_url=max_page_per_url,
+            black_list_key=black_list_keyword
             )
         log = scrp.logger()
         
