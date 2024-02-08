@@ -1,6 +1,7 @@
 import unittest, os
 from TokopediaScraper.tokopedia import Scraper
-from TokopediaScraper.other_func import create_logger, write_csv, create_not_exist_folder, remove_success_scrape
+from TokopediaScraper.other_func import write_csv, create_not_exist_folder, remove_success_scrape
+from TokopediaScraper.logger import create_logger
 
 class TestTokopediaModule(unittest.TestCase):
     def test_scraper_instance(self):

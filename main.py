@@ -51,7 +51,7 @@ def main():
         key_file = random.randint(10000,99999)
         jumlah = 0
         for i in list_cat:
-            jum = scrp.scrape(i,key_file)
+            jum = scrp.scrape_with_thread(i, key_file, max_worker=2)
             jumlah += jum
             if jumlah >= max_product_per_csv:
                 key_file = random.randint(10000,99999)

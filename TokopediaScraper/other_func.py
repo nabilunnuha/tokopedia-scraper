@@ -1,4 +1,4 @@
-import json, logging, sys, os, csv, re
+import json, os, csv, re
 
 def write_csv(data_list: list[dict], filename: str) -> None:
     header = data_list[0].keys()
@@ -10,28 +10,6 @@ def write_csv(data_list: list[dict], filename: str) -> None:
             csv_writer.writeheader()
 
         csv_writer.writerows(data_list)
-
-def create_logger(logger_name,log_path='./log/log.txt') -> logging.Logger:
-    if logger_name not in logging.Logger.manager.loggerDict:
-
-        file_handler = logging.FileHandler(log_path)
-        file_formatter = logging.Formatter("%(asctime)s - %(levelname)s - %(message)s", datefmt='%Y-%m-%d %H:%M:%S')
-        file_handler.setFormatter(file_formatter)
-        logger = logging.getLogger(logger_name)
-        logger.addHandler(file_handler)
-
-        console_handler = logging.StreamHandler(sys.stdout)
-        formatter = ColoredFormatter("%(asctime)s - %(levelname)s - %(message)s", datefmt='%Y-%m-%d %H:%M:%S')
-        console_handler.setFormatter(formatter)
-        logger = logging.getLogger(logger_name)
-        logger.addHandler(console_handler)
-        
-        logger.setLevel(logging.INFO)
-
-    else:
-        logger = logging.getLogger(logger_name)
-
-    return logger
 
 def create_not_exist_folder() -> None:
     if not os.path.exists('results'):
@@ -75,4 +53,5 @@ def get_key_user_input(path_key: str='./config/black_list_keyword.txt', min_len_
         data = [key for key in data if len(key) >= min_len_str]
     return list(set(data))
              
-from .tokopedia import ColoredFormatter
+if __name__ == "__main__":
+    create_not_exist_folder()

@@ -1,4 +1,5 @@
-import requests, json, time, logging, colorama, re
+import json, time, logging, colorama, httpx
+from concurrent.futures import ThreadPoolExecutor, as_completed
 
 class Scraper:
     def __init__(self, filter_product:dict, max_page_per_url: int, black_list_key: list[str]) -> None:
@@ -6,7 +7,7 @@ class Scraper:
         - ex. filter_product:
             {"min_sold": 10, "max_sold":999,"min_price":10000,"max_price":150000,"min_rating":4.2}
         '''
-        self.session = requests.Session()
+        self.client = httpx.Client()
         self.headers: dict = {
             'content-type': 'application/json',
             'accept-encoding': 'gzip, deflate, br',
@@ -17,7 +18,7 @@ class Scraper:
         self.filter_product: dict = filter_product
         self.max_page_per_url: int = max_page_per_url
         self.black_list_key: list[str] = black_list_key
-        self.log: logging = create_logger(__name__)
+        self.log: logging = create_logger(logger_name=__name__, log_path='./log/logger.log')
         self.count_scrape: int = 0
         self.cookie_dict: dict = {}
         self.cookie_list: list = []
@@ -44,46 +45,70 @@ class Scraper:
         self.headers['cookie'] = result_str_cookie
 
     def get_cookies_web_api(self) -> None:
-        headers = {
-            'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,image/apng,*/*;q=0.8,application/signed-exchange;v=b3;q=0.7',
-            'Accept-Encoding': 'gzip, deflate, br',
-            'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/121.0.0.0 Safari/537.36 Edg/121.0.0.0'
-        }
-        r = self.session.get('https://www.tokopedia.com/', headers=headers, timeout=self.timeout)
-        c_dict = r.cookies.get_dict()
-        self.cookie_dict = c_dict
-        self.update_cookie()
+        try:
+            headers = {
+                'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,image/apng,*/*;q=0.8,application/signed-exchange;v=b3;q=0.7',
+                'Accept-Encoding': 'gzip, deflate, br',
+                'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/121.0.0.0 Safari/537.36 Edg/121.0.0.0'
+            }
+            r = self.client.get('https://www.tokopedia.com/', headers=headers, timeout=self.timeout)
+            r.raise_for_status()
+            c_dict = dict(r.cookies)
+            self.cookie_dict = c_dict
+            self.update_cookie()
+        except httpx.HTTPError as e:
+            self.log.error(e)
     
     def upkie(self) -> None:
-        r = self.session.get('https://accounts.tokopedia.com/upkie', headers=self.headers, timeout=self.timeout)
-        c_response = r.cookies.get_dict()
-        self.cookie_dict.update(c_response)
-        self.update_cookie()
+        try:
+            r = self.client.get('https://accounts.tokopedia.com/upkie', headers=self.headers, timeout=self.timeout)
+            r.raise_for_status()
+            c_response = dict(r.cookies)
+            self.cookie_dict.update(c_response)
+            self.update_cookie()
+        except httpx.HTTPError as e:
+            self.log.error(e)
         
     def GetStateChosenAddress(self) -> None:
-        payload = [{"operationName":"GetStateChosenAddress","variables":{"source":"home","is_tokonow_request":True},"query":"query GetStateChosenAddress($source: String!, $is_tokonow_request: Boolean) {\n  keroAddrGetStateChosenAddress(source: $source, is_tokonow_request: $is_tokonow_request) {\n    data {\n      addr_id\n      receiver_name\n      addr_name\n      district\n      city\n      city_name\n      district_name\n      status\n      latitude\n      longitude\n      postal_code\n      __typename\n    }\n    status\n    kero_addr_error {\n      code\n      detail\n      __typename\n    }\n    tokonow {\n      shop_id\n      warehouse_id\n      warehouses {\n        warehouse_id\n        service_type\n        __typename\n      }\n      service_type\n      tokonow_last_update\n      __typename\n    }\n    __typename\n  }\n}\n"}]
-        r = self.session.post('https://gql.tokopedia.com/graphql/GetStateChosenAddress', headers=self.headers, data=json.dumps(payload), timeout=self.timeout).json()
-        self.warehouse_id: int = r[0]['data']['keroAddrGetStateChosenAddress']['tokonow']['warehouse_id']
-        self.shop_id: int = r[0]['data']['keroAddrGetStateChosenAddress']['tokonow']['shop_id']
-        self.service_type: str = r[0]['data']['keroAddrGetStateChosenAddress']['tokonow']['service_type']
-        self.addr_id: int = r[0]['data']['keroAddrGetStateChosenAddress']['data']['addr_id']
-        self.city_id: int = r[0]['data']['keroAddrGetStateChosenAddress']['data']['city']
-        self.postal_code: str = r[0]['data']['keroAddrGetStateChosenAddress']['data']['postal_code']
-        self.district_id: int = r[0]['data']['keroAddrGetStateChosenAddress']['data']['district']
-        self.latlon: str = r[0]['data']['keroAddrGetStateChosenAddress']['data']['latitude'] + r[0]['data']['keroAddrGetStateChosenAddress']['data']['longitude']
+        try:
+            payload = [{"operationName":"GetStateChosenAddress","variables":{"source":"home","is_tokonow_request":True},"query":"query GetStateChosenAddress($source: String!, $is_tokonow_request: Boolean) {\n  keroAddrGetStateChosenAddress(source: $source, is_tokonow_request: $is_tokonow_request) {\n    data {\n      addr_id\n      receiver_name\n      addr_name\n      district\n      city\n      city_name\n      district_name\n      status\n      latitude\n      longitude\n      postal_code\n      __typename\n    }\n    status\n    kero_addr_error {\n      code\n      detail\n      __typename\n    }\n    tokonow {\n      shop_id\n      warehouse_id\n      warehouses {\n        warehouse_id\n        service_type\n        __typename\n      }\n      service_type\n      tokonow_last_update\n      __typename\n    }\n    __typename\n  }\n}\n"}]
+            r = self.client.post('https://gql.tokopedia.com/graphql/GetStateChosenAddress', headers=self.headers, data=json.dumps(payload), timeout=self.timeout)
+            r.raise_for_status()
+            r = r.json()
+            self.warehouse_id: int = r[0]['data']['keroAddrGetStateChosenAddress']['tokonow']['warehouse_id']
+            self.shop_id: int = r[0]['data']['keroAddrGetStateChosenAddress']['tokonow']['shop_id']
+            self.service_type: str = r[0]['data']['keroAddrGetStateChosenAddress']['tokonow']['service_type']
+            self.addr_id: int = r[0]['data']['keroAddrGetStateChosenAddress']['data']['addr_id']
+            self.city_id: int = r[0]['data']['keroAddrGetStateChosenAddress']['data']['city']
+            self.postal_code: str = r[0]['data']['keroAddrGetStateChosenAddress']['data']['postal_code']
+            self.district_id: int = r[0]['data']['keroAddrGetStateChosenAddress']['data']['district']
+            self.latlon: str = r[0]['data']['keroAddrGetStateChosenAddress']['data']['latitude'] + r[0]['data']['keroAddrGetStateChosenAddress']['data']['longitude']
+        except httpx.HTTPError as e:
+            self.log.error(e)
         
     def TickerQuery(self) -> None:
-        payload = [{"operationName":"TickerQuery","variables":{},"query":"query TickerQuery {\n  ticker {\n    tickers {\n      id\n      title\n      message\n      color\n      type: ticker_type\n      __typename\n    }\n    __typename\n  }\n}\n"}]
-        r = self.session.post('https://gql.tokopedia.com/graphql/TickerQuery', headers=self.headers, data=json.dumps(payload), timeout=self.timeout).json()
+        try:
+            payload = [{"operationName":"TickerQuery","variables":{},"query":"query TickerQuery {\n  ticker {\n    tickers {\n      id\n      title\n      message\n      color\n      type: ticker_type\n      __typename\n    }\n    __typename\n  }\n}\n"}]
+            r = self.client.post('https://gql.tokopedia.com/graphql/TickerQuery', headers=self.headers, data=json.dumps(payload), timeout=self.timeout)
+            r.raise_for_status()
+            r = r.json()
+        except httpx.HTTPError as e:
+            self.log.error(e)
     
     def get_category_tokopedia(self):
-        payload = [{"operationName":"headerMainData","variables":{"filter":"buyer"},"query":"query headerMainData($filter: String) {\n  dynamicHomeIcon {\n    categoryGroup {\n      id\n      title\n      desc\n      categoryRows {\n        id\n        name\n        url\n        imageUrl\n        type\n        categoryId\n        __typename\n      }\n      __typename\n    }\n    __typename\n  }\n  categoryAllListLite(filter: $filter) {\n    categories {\n      id\n      name\n      url\n      iconImageUrl\n      isCrawlable\n      children {\n        id\n        name\n        url\n        isCrawlable\n        children {\n          id\n          name\n          url\n          isCrawlable\n          __typename\n        }\n        __typename\n      }\n      __typename\n    }\n    __typename\n  }\n}\n"}]
-        r = self.session.post('https://gql.tokopedia.com/graphql/headerMainData', headers=self.headers, data=json.dumps(payload), timeout=self.timeout).json()
-        list_Cat = r[0]['data']['categoryAllListLite']['categories']
-        return list_Cat
-    
+        try:
+            payload = [{"operationName":"headerMainData","variables":{"filter":"buyer"},"query":"query headerMainData($filter: String) {\n  dynamicHomeIcon {\n    categoryGroup {\n      id\n      title\n      desc\n      categoryRows {\n        id\n        name\n        url\n        imageUrl\n        type\n        categoryId\n        __typename\n      }\n      __typename\n    }\n    __typename\n  }\n  categoryAllListLite(filter: $filter) {\n    categories {\n      id\n      name\n      url\n      iconImageUrl\n      isCrawlable\n      children {\n        id\n        name\n        url\n        isCrawlable\n        children {\n          id\n          name\n          url\n          isCrawlable\n          __typename\n        }\n        __typename\n      }\n      __typename\n    }\n    __typename\n  }\n}\n"}]
+            r = self.client.post('https://gql.tokopedia.com/graphql/headerMainData', headers=self.headers, data=json.dumps(payload), timeout=self.timeout)
+            r.raise_for_status()
+            r = r.json()
+            list_Cat = r[0]['data']['categoryAllListLite']['categories']
+            return list_Cat
+        except httpx.HTTPError as e:
+            self.log.error(e)
+            return []
+        
     def hard_refresh(self):
-        self.session = requests.Session()
+        self.client = httpx.Client()
         self.headers: dict = {
             'content-type': 'application/json',
             'accept-encoding': 'gzip, deflate, br',
@@ -136,7 +161,9 @@ class Scraper:
                 "adParams":f"page=2&page=2&dep_id={url_id}&ob=&ep=product&item=15&src=directory&device=desktop&user_id=0&minimum_item=15&start=1&no_autofill_range=5-14"
                 },"query":"query SearchProductQuery($params: String, $adParams: String) {\n  CategoryProducts: searchProduct(params: $params) {\n    count\n    data: products {\n      id\n      url\n      imageUrl: image_url\n      imageUrlLarge: image_url_700\n      catId: category_id\n      gaKey: ga_key\n      countReview: count_review\n      discountPercentage: discount_percentage\n      preorder: is_preorder\n      name\n      price\n      priceInt: price_int\n      original_price\n      rating\n      wishlist\n      labels {\n        title\n        color\n        __typename\n      }\n      badges {\n        imageUrl: image_url\n        show\n        __typename\n      }\n      shop {\n        id\n        url\n        name\n        goldmerchant: is_power_badge\n        official: is_official\n        reputation\n        clover\n        location\n        __typename\n      }\n      labelGroups: label_groups {\n        position\n        title\n        type\n        __typename\n      }\n      __typename\n    }\n    __typename\n  }\n  displayAdsV3(displayParams: $adParams) {\n    data {\n      id\n      ad_ref_key\n      redirect\n      sticker_id\n      sticker_image\n      productWishListUrl: product_wishlist_url\n      clickTrackUrl: product_click_url\n      shop_click_url\n      product {\n        id\n        name\n        wishlist\n        image {\n          imageUrl: s_ecs\n          trackerImageUrl: s_url\n          __typename\n        }\n        url: uri\n        relative_uri\n        price: price_format\n        campaign {\n          original_price\n          discountPercentage: discount_percentage\n          __typename\n        }\n        wholeSalePrice: wholesale_price {\n          quantityMin: quantity_min_format\n          quantityMax: quantity_max_format\n          price: price_format\n          __typename\n        }\n        count_talk_format\n        countReview: count_review_format\n        category {\n          id\n          __typename\n        }\n        preorder: product_preorder\n        product_wholesale\n        free_return\n        isNewProduct: product_new_label\n        cashback: product_cashback_rate\n        rating: product_rating\n        top_label\n        bottomLabel: bottom_label\n        __typename\n      }\n      shop {\n        image_product {\n          image_url\n          __typename\n        }\n        id\n        name\n        domain\n        location\n        city\n        tagline\n        goldmerchant: gold_shop\n        gold_shop_badge\n        official: shop_is_official\n        lucky_shop\n        uri\n        owner_id\n        is_owner\n        badges {\n          title\n          image_url\n          show\n          __typename\n        }\n        __typename\n      }\n      applinks\n      __typename\n    }\n    template {\n      isAd: is_ad\n      __typename\n    }\n    __typename\n  }\n}\n"
             }]
-            r = self.session.post('https://gql.tokopedia.com/graphql/SearchProductQuery',headers=self.headers,data=json.dumps(payload),timeout=self.timeout).json()
+            r = self.client.post('https://gql.tokopedia.com/graphql/SearchProductQuery',headers=self.headers,data=json.dumps(payload),timeout=self.timeout)
+            r.raise_for_status()
+            r = r.json()
             count = r[0]['data']['CategoryProducts']['count']
             max_page = int(count / 60) - 1
             max_page = max_page if max_page <= self.max_page_per_url else self.max_page_per_url
@@ -149,7 +176,9 @@ class Scraper:
                         "adParams":f"page=2&page=2&dep_id={url_id}&ob=&ep=product&item=15&src=directory&device=desktop&user_id=0&minimum_item=15&start={start}&no_autofill_range=5-14"
                         },"query":"query SearchProductQuery($params: String, $adParams: String) {\n  CategoryProducts: searchProduct(params: $params) {\n    count\n    data: products {\n      id\n      url\n      imageUrl: image_url\n      imageUrlLarge: image_url_700\n      catId: category_id\n      gaKey: ga_key\n      countReview: count_review\n      discountPercentage: discount_percentage\n      preorder: is_preorder\n      name\n      price\n      priceInt: price_int\n      original_price\n      rating\n      wishlist\n      labels {\n        title\n        color\n        __typename\n      }\n      badges {\n        imageUrl: image_url\n        show\n        __typename\n      }\n      shop {\n        id\n        url\n        name\n        goldmerchant: is_power_badge\n        official: is_official\n        reputation\n        clover\n        location\n        __typename\n      }\n      labelGroups: label_groups {\n        position\n        title\n        type\n        __typename\n      }\n      __typename\n    }\n    __typename\n  }\n  displayAdsV3(displayParams: $adParams) {\n    data {\n      id\n      ad_ref_key\n      redirect\n      sticker_id\n      sticker_image\n      productWishListUrl: product_wishlist_url\n      clickTrackUrl: product_click_url\n      shop_click_url\n      product {\n        id\n        name\n        wishlist\n        image {\n          imageUrl: s_ecs\n          trackerImageUrl: s_url\n          __typename\n        }\n        url: uri\n        relative_uri\n        price: price_format\n        campaign {\n          original_price\n          discountPercentage: discount_percentage\n          __typename\n        }\n        wholeSalePrice: wholesale_price {\n          quantityMin: quantity_min_format\n          quantityMax: quantity_max_format\n          price: price_format\n          __typename\n        }\n        count_talk_format\n        countReview: count_review_format\n        category {\n          id\n          __typename\n        }\n        preorder: product_preorder\n        product_wholesale\n        free_return\n        isNewProduct: product_new_label\n        cashback: product_cashback_rate\n        rating: product_rating\n        top_label\n        bottomLabel: bottom_label\n        __typename\n      }\n      shop {\n        image_product {\n          image_url\n          __typename\n        }\n        id\n        name\n        domain\n        location\n        city\n        tagline\n        goldmerchant: gold_shop\n        gold_shop_badge\n        official: shop_is_official\n        lucky_shop\n        uri\n        owner_id\n        is_owner\n        badges {\n          title\n          image_url\n          show\n          __typename\n        }\n        __typename\n      }\n      applinks\n      __typename\n    }\n    template {\n      isAd: is_ad\n      __typename\n    }\n    __typename\n  }\n}\n"
                     }]
-                    r = self.session.post('https://gql.tokopedia.com/graphql/SearchProductQuery',headers=self.headers,data=json.dumps(payload),timeout=self.timeout).json()
+                    r = self.client.post('https://gql.tokopedia.com/graphql/SearchProductQuery',headers=self.headers,data=json.dumps(payload),timeout=self.timeout)
+                    r.raise_for_status()
+                    r = r.json()
                     list_product = r[0]['data']['CategoryProducts']['data']
                     start += 60
                     for i in list_product:
@@ -176,15 +205,20 @@ class Scraper:
                             pass
                 except:
                     self.log.error(f'Error: Get product in page {page}')
+        except httpx.HTTPError as e:
+            self.log.error(e)
         except Exception as e:
             self.log.error(f'Error: {e}')
         finally:
             return list_data
     
     def authen_request(self):
-        payload = [{"operationName":"isAuthenticatedQuery","variables":{},"query":"query isAuthenticatedQuery {\n  isAuthenticated\n}\n"}]
-        self.session.post('https://gql.tokopedia.com/graphql/isAuthenticatedQuery', headers=self.headers, data=json.dumps(payload), timeout=self.timeout).json()
-    
+        try:    
+            payload = [{"operationName":"isAuthenticatedQuery","variables":{},"query":"query isAuthenticatedQuery {\n  isAuthenticated\n}\n"}]
+            self.client.post('https://gql.tokopedia.com/graphql/isAuthenticatedQuery', headers=self.headers, data=json.dumps(payload), timeout=self.timeout)
+        except httpx.HTTPError as e:
+            self.log.error(e)
+            
     def update_headers_pdp(self):
         h_dict = {
                 'sec-ch-ua': '"Not A(Brand";v="99", "Google Chrome";v="121", "Chromium";v="121"',
@@ -252,9 +286,10 @@ class Scraper:
                 "query":"fragment ProductVariant on pdpDataProductVariant {\n  errorCode\n  parentID\n  defaultChild\n  sizeChart\n  totalStockFmt\n  variants {\n    productVariantID\n    variantID\n    name\n    identifier\n    option {\n      picture {\n        urlOriginal: url\n        urlThumbnail: url100\n        __typename\n      }\n      productVariantOptionID\n      variantUnitValueID\n      value\n      hex\n      stock\n      __typename\n    }\n    __typename\n  }\n  children {\n    productID\n    price\n    priceFmt\n    slashPriceFmt\n    discPercentage\n    optionID\n    optionName\n    productName\n    productURL\n    picture {\n      urlOriginal: url\n      urlThumbnail: url100\n      __typename\n    }\n    stock {\n      stock\n      isBuyable\n      stockWordingHTML\n      minimumOrder\n      maximumOrder\n      __typename\n    }\n    isCOD\n    isWishlist\n    campaignInfo {\n      campaignID\n      campaignType\n      campaignTypeName\n      campaignIdentifier\n      background\n      discountPercentage\n      originalPrice\n      discountPrice\n      stock\n      stockSoldPercentage\n      startDate\n      endDate\n      endDateUnix\n      appLinks\n      isAppsOnly\n      isActive\n      hideGimmick\n      isCheckImei\n      minOrder\n      __typename\n    }\n    thematicCampaign {\n      additionalInfo\n      background\n      campaignName\n      icon\n      __typename\n    }\n    __typename\n  }\n  __typename\n}\n\nfragment ProductMedia on pdpDataProductMedia {\n  media {\n    type\n    urlOriginal: URLOriginal\n    urlThumbnail: URLThumbnail\n    urlMaxRes: URLMaxRes\n    videoUrl: videoURLAndroid\n    prefix\n    suffix\n    description\n    variantOptionID\n    __typename\n  }\n  videos {\n    source\n    url\n    __typename\n  }\n  __typename\n}\n\nfragment ProductCategoryCarousel on pdpDataCategoryCarousel {\n  linkText\n  titleCarousel\n  applink\n  list {\n    categoryID\n    icon\n    title\n    isApplink\n    applink\n    __typename\n  }\n  __typename\n}\n\nfragment ProductHighlight on pdpDataProductContent {\n  name\n  price {\n    value\n    currency\n    priceFmt\n    slashPriceFmt\n    discPercentage\n    __typename\n  }\n  campaign {\n    campaignID\n    campaignType\n    campaignTypeName\n    campaignIdentifier\n    background\n    percentageAmount\n    originalPrice\n    discountedPrice\n    originalStock\n    stock\n    stockSoldPercentage\n    threshold\n    startDate\n    endDate\n    endDateUnix\n    appLinks\n    isAppsOnly\n    isActive\n    hideGimmick\n    __typename\n  }\n  thematicCampaign {\n    additionalInfo\n    background\n    campaignName\n    icon\n    __typename\n  }\n  stock {\n    useStock\n    value\n    stockWording\n    __typename\n  }\n  variant {\n    isVariant\n    parentID\n    __typename\n  }\n  wholesale {\n    minQty\n    price {\n      value\n      currency\n      __typename\n    }\n    __typename\n  }\n  isCashback {\n    percentage\n    __typename\n  }\n  isTradeIn\n  isOS\n  isPowerMerchant\n  isWishlist\n  isCOD\n  preorder {\n    duration\n    timeUnit\n    isActive\n    preorderInDays\n    __typename\n  }\n  __typename\n}\n\nfragment ProductCustomInfo on pdpDataCustomInfo {\n  icon\n  title\n  isApplink\n  applink\n  separator\n  description\n  __typename\n}\n\nfragment ProductInfo on pdpDataProductInfo {\n  row\n  content {\n    title\n    subtitle\n    applink\n    __typename\n  }\n  __typename\n}\n\nfragment ProductDetail on pdpDataProductDetail {\n  content {\n    title\n    subtitle\n    applink\n    showAtFront\n    isAnnotation\n    __typename\n  }\n  __typename\n}\n\nfragment ProductDataInfo on pdpDataInfo {\n  icon\n  title\n  isApplink\n  applink\n  content {\n    icon\n    text\n    __typename\n  }\n  __typename\n}\n\nfragment ProductSocial on pdpDataSocialProof {\n  row\n  content {\n    icon\n    title\n    subtitle\n    applink\n    type\n    rating\n    __typename\n  }\n  __typename\n}\n\nfragment ProductDetailMediaComponent on pdpDataProductDetailMediaComponent {\n  title\n  description\n  contentMedia {\n    url\n    ratio\n    type\n    __typename\n  }\n  show\n  ctaText\n  __typename\n}\n\nquery PDPGetLayoutQuery($shopDomain: String, $productKey: String, $layoutID: String, $apiVersion: Float, $userLocation: pdpUserLocation, $extParam: String, $tokonow: pdpTokoNow, $deviceID: String) {\n  pdpGetLayout(shopDomain: $shopDomain, productKey: $productKey, layoutID: $layoutID, apiVersion: $apiVersion, userLocation: $userLocation, extParam: $extParam, tokonow: $tokonow, deviceID: $deviceID) {\n    requestID\n    name\n    pdpSession\n    basicInfo {\n      alias\n      createdAt\n      isQA\n      id: productID\n      shopID\n      shopName\n      minOrder\n      maxOrder\n      weight\n      weightUnit\n      condition\n      status\n      url\n      needPrescription\n      catalogID\n      isLeasing\n      isBlacklisted\n      isTokoNow\n      menu {\n        id\n        name\n        url\n        __typename\n      }\n      category {\n        id\n        name\n        title\n        breadcrumbURL\n        isAdult\n        isKyc\n        minAge\n        detail {\n          id\n          name\n          breadcrumbURL\n          isAdult\n          __typename\n        }\n        __typename\n      }\n      txStats {\n        transactionSuccess\n        transactionReject\n        countSold\n        paymentVerified\n        itemSoldFmt\n        __typename\n      }\n      stats {\n        countView\n        countReview\n        countTalk\n        rating\n        __typename\n      }\n      __typename\n    }\n    components {\n      name\n      type\n      position\n      data {\n        ...ProductMedia\n        ...ProductHighlight\n        ...ProductInfo\n        ...ProductDetail\n        ...ProductSocial\n        ...ProductDataInfo\n        ...ProductCustomInfo\n        ...ProductVariant\n        ...ProductCategoryCarousel\n        ...ProductDetailMediaComponent\n        __typename\n      }\n      __typename\n    }\n    __typename\n  }\n}\n"
             }]
             self.update_headers_pdp()
-            r = self.session.post('https://gql.tokopedia.com/graphql/GetStateChosenAddress', headers=self.headers, data=json.dumps(payload), timeout=self.timeout).json()
+            r = self.client.post('https://gql.tokopedia.com/graphql/GetStateChosenAddress', headers=self.headers, data=json.dumps(payload), timeout=self.timeout)
+            r.raise_for_status()
+            r = r.json()
             pdpGetLayout = r[0]['data']['pdpGetLayout']
-            
             components: list[dict] = pdpGetLayout['components']
             basicInfo: dict = pdpGetLayout['basicInfo']
             url = basicInfo['url']
@@ -336,13 +371,13 @@ class Scraper:
             self.count_scrape += 1
             self.log.info(f'Scraped: {self.count_scrape} product')
             return result_dict, variants
-        except Exception as e:
+        except httpx.HTTPError as e:
             self.log.error(f'Error: {e}')
             self.log.warning('Sleeping 10s')
             time.sleep(10)
             self.hard_refresh()
             return None, None
-        
+
     def scrape(self,url_category: str,key_output: int) -> int:
         list_data = self.get_product_per_category(url_category)
         self.log.info(f'Found {len(list_data)} product')
@@ -361,7 +396,35 @@ class Scraper:
         if len(variants):
             write_csv(variants,f'results/products-{key_output}-variants.csv')
         return len(results)
-                   
+    
+    def scrape_with_thread(self, url_category: str, key_output: int, max_worker: int=2) -> int:
+        list_data = self.get_product_per_category(url_category)
+        self.log.info(f'Found {len(list_data)} product')
+        
+        results = []
+        variants = []
+
+        with ThreadPoolExecutor(max_worker) as executor:
+            futures = [executor.submit(self.get_detail_product, product['shop_domain'], product['identifier_product']) for product in list_data]
+
+            for future in as_completed(futures):
+                try:
+                    result, var = future.result()
+                    if result:
+                        results.append(result)
+                    if var:
+                        variants.extend(var)
+                except Exception as e:
+                    self.log.error(f"An error occurred: {e}")
+
+        if results:
+            write_csv(results, f'results/products-{key_output}.csv')
+            self.log.info(f'Add data: products-{key_output}.csv')
+        if variants:
+            write_csv(variants, f'results/products-{key_output}-variants.csv')
+
+        return len(results)
+                     
 class ColoredFormatter(logging.Formatter):
     def __init__(self, *args, **kwargs):
         colorama.init()
@@ -378,4 +441,5 @@ class ColoredFormatter(logging.Formatter):
             record.levelname = f"{self._level_colors[record.levelno]}{record.levelname}{self._reset_color}"
         return super().format(record)   
     
-from .other_func import create_logger, write_csv, clean_string
+from .other_func import write_csv, clean_string
+from .logger import create_logger
