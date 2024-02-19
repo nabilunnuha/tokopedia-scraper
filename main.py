@@ -41,7 +41,7 @@ def main():
         log = scrp.logger()
         
         if generate.lower().strip() == 'y' :
-            return scrp.generate_category()
+            scrp.generate_category()
         
         data_input_user = {"min_sold": min_sold, "max_sold":max_sold, "min_price":min_price, "max_price":max_price, "min_rating":min_rating, 'max_product_per_csv':max_product_per_csv, 'max_page_per_url':max_page_per_url}
         log.info(f'\n{json.dumps(data_input_user,indent=4)}')
@@ -50,13 +50,13 @@ def main():
             list_cat = list(set(list_cat))
         key_file = random.randint(10000,99999)
         jumlah = 0
-        for i in list_cat:
-            jum = scrp.scrape_with_thread(i, key_file, max_worker=2)
+        for url in list_cat:
+            jum = scrp.scrape_with_concurrent(url, key_file, max_worker=2)
             jumlah += jum
             if jumlah >= max_product_per_csv:
                 key_file = random.randint(10000,99999)
                 jumlah = 0
-            remove_success_scrape(i)
+            remove_success_scrape(url)
     except Exception as e:
         exception = str(e)
         error_traceback = traceback.format_exc()

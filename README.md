@@ -4,8 +4,10 @@
 Tokopedia Scraper is a tool designed for scraping data from Tokopedia, providing results that can be utilized within the Qlobot tool.
 
 ## Requirements
-- [requests](https://pypi.org/project/requests/)
+- [httpx](https://pypi.org/project/httpx/)
 - [colorama](https://pypi.org/project/colorama/)
+- [tqdm](https://pypi.org/project/tqdm/)
+- [pydantic](https://pypi.org/project/pydantic/)
 
 ## How to Run
 
@@ -31,7 +33,7 @@ Please refer to the instructions provided in `compile_to_exe.txt`. Follow the st
 
 ## Package Information
 
-- **Author:** [Nabilunnuha]
+- **Author:** [Nabilunnuha](https://github.com/nabilunnuha/)
 
 ## Notes
 - Ensure that you have Python installed on your system before running the commands.

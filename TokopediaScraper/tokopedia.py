@@ -1,5 +1,7 @@
 import json, time, logging, colorama, httpx
 from concurrent.futures import ThreadPoolExecutor, as_completed
+from tqdm import tqdm
+from .model import Item, ProductPage, ItemVariants
 
 class Scraper:
     def __init__(self, filter_product:dict, max_page_per_url: int, black_list_key: list[str]) -> None:
@@ -147,8 +149,8 @@ class Scraper:
         with open(output,'w') as f:
             f.write('\n'.join(list_result_id))
     
-    def get_product_per_category(self,url_category: str) -> list[dict]:
-        list_data: list[dict] = []
+    def get_product_per_category(self,url_category: str) -> list[ProductPage]:
+        list_data = []
         try:
             self.restore_headers()
             identifier:str = url_category.split('?')[0]
@@ -169,7 +171,7 @@ class Scraper:
             max_page = max_page if max_page <= self.max_page_per_url else self.max_page_per_url
             start = 1
             self.log.info('Getting category product...')
-            for page in range(1, max_page):
+            for page in tqdm(range(1, max_page+1), desc='Get item / pages', ncols=100):
                 try:
                     payload = [{"operationName":"SearchProductQuery","variables":{
                         "params":f"page=2&ob=&identifier={identifier}&sc={url_id}&user_id=0&rows=60&start={start}&source=directory&device=desktop&page=2&related=true&st=product&safe_search=false",
@@ -177,10 +179,10 @@ class Scraper:
                         },"query":"query SearchProductQuery($params: String, $adParams: String) {\n  CategoryProducts: searchProduct(params: $params) {\n    count\n    data: products {\n      id\n      url\n      imageUrl: image_url\n      imageUrlLarge: image_url_700\n      catId: category_id\n      gaKey: ga_key\n      countReview: count_review\n      discountPercentage: discount_percentage\n      preorder: is_preorder\n      name\n      price\n      priceInt: price_int\n      original_price\n      rating\n      wishlist\n      labels {\n        title\n        color\n        __typename\n      }\n      badges {\n        imageUrl: image_url\n        show\n        __typename\n      }\n      shop {\n        id\n        url\n        name\n        goldmerchant: is_power_badge\n        official: is_official\n        reputation\n        clover\n        location\n        __typename\n      }\n      labelGroups: label_groups {\n        position\n        title\n        type\n        __typename\n      }\n      __typename\n    }\n    __typename\n  }\n  displayAdsV3(displayParams: $adParams) {\n    data {\n      id\n      ad_ref_key\n      redirect\n      sticker_id\n      sticker_image\n      productWishListUrl: product_wishlist_url\n      clickTrackUrl: product_click_url\n      shop_click_url\n      product {\n        id\n        name\n        wishlist\n        image {\n          imageUrl: s_ecs\n          trackerImageUrl: s_url\n          __typename\n        }\n        url: uri\n        relative_uri\n        price: price_format\n        campaign {\n          original_price\n          discountPercentage: discount_percentage\n          __typename\n        }\n        wholeSalePrice: wholesale_price {\n          quantityMin: quantity_min_format\n          quantityMax: quantity_max_format\n          price: price_format\n          __typename\n        }\n        count_talk_format\n        countReview: count_review_format\n        category {\n          id\n          __typename\n        }\n        preorder: product_preorder\n        product_wholesale\n        free_return\n        isNewProduct: product_new_label\n        cashback: product_cashback_rate\n        rating: product_rating\n        top_label\n        bottomLabel: bottom_label\n        __typename\n      }\n      shop {\n        image_product {\n          image_url\n          __typename\n        }\n        id\n        name\n        domain\n        location\n        city\n        tagline\n        goldmerchant: gold_shop\n        gold_shop_badge\n        official: shop_is_official\n        lucky_shop\n        uri\n        owner_id\n        is_owner\n        badges {\n          title\n          image_url\n          show\n          __typename\n        }\n        __typename\n      }\n      applinks\n      __typename\n    }\n    template {\n      isAd: is_ad\n      __typename\n    }\n    __typename\n  }\n}\n"
                     }]
                     r = self.client.post('https://gql.tokopedia.com/graphql/SearchProductQuery',headers=self.headers,data=json.dumps(payload),timeout=self.timeout)
+                    start += 60
                     r.raise_for_status()
                     r = r.json()
                     list_product = r[0]['data']['CategoryProducts']['data']
-                    start += 60
                     for i in list_product:
                         try:
                             shop_name: str  = i['shop']['name']
@@ -200,7 +202,9 @@ class Scraper:
                                     continue
                                 if float(rating) < float(self.filter_product['min_rating']):
                                     continue
-                            list_data.append({'shop_name':shop_name,'product_url':product_url, 'price':price,'rating':rating,'product_name':product_name,'identifier_product':identifier_product,'shop_domain':shop_domain})
+                            product_dict = {'shop_name':shop_name,'product_url':product_url, 'price':price,'rating':rating,'product_name':product_name,'identifier_product':identifier_product,'shop_domain':shop_domain}
+                            product = ProductPage(**product_dict)
+                            list_data.append(product)
                         except:
                             pass
                 except:
@@ -251,8 +255,8 @@ class Scraper:
             if i in self.headers:
                 del self.headers[i]
     
-    def processing_variant_product(self,url:str,new_variant_options_data: list[dict]) -> list[dict]:
-        list_result: list[dict] = []
+    def processing_variant_product(self,url:str,new_variant_options_data: list[dict]) -> list[ItemVariants]:
+        list_result: list[ItemVariants] = []
         childrens = new_variant_options_data[0]['children']
         variants = new_variant_options_data[0]['variants']
         if variants:
@@ -265,11 +269,12 @@ class Scraper:
                 v2_name = variants[1]['name'] if len(variants) > 1 else ''
                 v2_value = children['optionName'][1] if len(children['optionName']) > 1 else ''
                 result = {'url':url, 'v_stock':v_stock, 'v_price':v_price, 'v_image':v_image, 'v1_name':v1_name, 'v1_value':v1_value, 'v2_name':v2_name, 'v2_value':v2_value}
-                list_result.append(result)
+                item_variant = ItemVariants(**result)
+                list_result.append(item_variant)
                 
         return list_result
             
-    def get_detail_product(self,shop_domain:str,identifier_product:str) -> tuple[dict,list]:
+    def get_detail_product(self,shop_domain:str,identifier_product:str) -> tuple[Item, list[ItemVariants]]:
         try:
             self.upkie()
             self.authen_request()
@@ -311,7 +316,7 @@ class Scraper:
                     product_media_data = component.get('data', [])
                 if component.get('name') == 'new_variant_options':
                     new_variant_options_data: list[dict] = component.get('data', [])
-            variants = self.processing_variant_product(url,new_variant_options_data)
+            variants = self.processing_variant_product(url, new_variant_options_data)
             pictures = product_media_data[0]['media']
             thumbnail_1 = pictures[0]['urlOriginal'] if len(pictures) >= 1 else ''
             thumbnail_2 = pictures[1]['urlOriginal'] if len(pictures) >= 2 else ''
@@ -368,9 +373,10 @@ class Scraper:
                             "stock": stock,
                             "size_image": size_image
                         }
+            item = Item(**result_dict)
             self.count_scrape += 1
             self.log.info(f'Scraped: {self.count_scrape} product')
-            return result_dict, variants
+            return item, variants
         except httpx.HTTPError as e:
             self.log.error(f'Error: {e}')
             self.log.warning('Sleeping 10s')
@@ -378,26 +384,45 @@ class Scraper:
             self.hard_refresh()
             return None, None
 
+    def merge_product_variant(self,products: list[Item], variants: list[ItemVariants]) -> list[dict]:
+        result_merge = []
+        for product in products:
+            url = product.url
+            product = product.model_dump()
+            if 'v_name1' not in product:
+                data_variant = [var.model_dump() for var in variants if var.url == url]
+                product['v_name1'] = data_variant[0]['v1_name'] if len(data_variant) >= 1 else ''
+                product['v_name2'] = data_variant[0]['v2_name'] if len(data_variant) >= 1 else ''
+                for i in range(1, 101):
+                    index = i - 1
+                    product[f'v{i}_value1'] = data_variant[index]['v1_value'] if len(data_variant) >= i else ''
+                    product[f'v{i}_value2'] = data_variant[index]['v2_value'] if len(data_variant) >= i else ''
+                    product[f'v{i}_price'] = data_variant[index]['v_price'] if len(data_variant) >= i else ''
+                    product[f'v{i}_stock'] = data_variant[index]['v_stock'] if len(data_variant) >= i else ''
+                    product[f'v{i}_image'] = data_variant[index]['v_image'] if len(data_variant) >= i else ''
+            result_merge.append(product)
+        return result_merge
+    
     def scrape(self,url_category: str,key_output: int) -> int:
         list_data = self.get_product_per_category(url_category)
         self.log.info(f'Found {len(list_data)} product')
         results = []
         variants = []
         for i in list_data:
-            result, var = self.get_detail_product(i['shop_domain'], i['identifier_product'])
+            result, var = self.get_detail_product(i.shop_domain, i.identifier_product)
             if result:
                 results.append(result)
             if var:
                 variants.extend(var)
                 
-        if len(results):
-            write_csv(results,f'results/products-{key_output}.csv')
+        merge_product = self.merge_product_variant(results, variants)
+        if merge_product:
+            write_csv(merge_product, f'results/products-{key_output}.csv')
             self.log.info(f'Add data: products-{key_output}.csv')
-        if len(variants):
-            write_csv(variants,f'results/products-{key_output}-variants.csv')
-        return len(results)
+
+        return len(merge_product)
     
-    def scrape_with_thread(self, url_category: str, key_output: int, max_worker: int=2) -> int:
+    def scrape_with_concurrent(self, url_category: str, key_output: int, max_worker: int=2) -> int:
         list_data = self.get_product_per_category(url_category)
         self.log.info(f'Found {len(list_data)} product')
         
@@ -405,7 +430,7 @@ class Scraper:
         variants = []
 
         with ThreadPoolExecutor(max_worker) as executor:
-            futures = [executor.submit(self.get_detail_product, product['shop_domain'], product['identifier_product']) for product in list_data]
+            futures = [executor.submit(self.get_detail_product, product.shop_domain, product.identifier_product) for product in list_data]
 
             for future in as_completed(futures):
                 try:
@@ -416,14 +441,12 @@ class Scraper:
                         variants.extend(var)
                 except Exception as e:
                     self.log.error(f"An error occurred: {e}")
-
-        if results:
-            write_csv(results, f'results/products-{key_output}.csv')
+        merge_product = self.merge_product_variant(results, variants)
+        if merge_product:
+            write_csv(merge_product, f'results/products-{key_output}.csv')
             self.log.info(f'Add data: products-{key_output}.csv')
-        if variants:
-            write_csv(variants, f'results/products-{key_output}-variants.csv')
 
-        return len(results)
+        return len(merge_product)
                      
 class ColoredFormatter(logging.Formatter):
     def __init__(self, *args, **kwargs):
